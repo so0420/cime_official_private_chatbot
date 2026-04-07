@@ -1,0 +1,24 @@
+# Build
+/target/
+
+# Database
+*.db
+*.db-wal
+*.db-shm
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Overlay generated file
+roulette_overlay.html
+
+# Images (development only)
+*.png
