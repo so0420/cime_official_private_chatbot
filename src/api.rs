@@ -181,24 +181,27 @@ pub async fn update_live_setting(
     if let Some(t) = tags {
         body.insert("tags".into(), serde_json::to_value(t).unwrap_or_default());
     }
+    let body_json = serde_json::Value::Object(body);
+    let body_str = serde_json::to_string(&body_json).unwrap_or_default();
     let client = reqwest::Client::new();
     let resp = client
         .patch(format!("{}/open/v1/lives/setting", BASE_URL))
         .bearer_auth(access_token)
-        .json(&body)
+        .header("Content-Type", "application/json")
+        .body(body_str.clone())
         .send()
         .await
         .map_err(|e| format!("{e}"))?;
     let status = resp.status();
+    let resp_body = resp.text().await.unwrap_or_default();
     if !status.is_success() {
-        let body = resp.text().await.unwrap_or_default();
-        return Err(format!("라이브 설정 변경 실패 ({}): {}", status, body));
+        return Err(format!("라이브 설정 변경 실패 ({}): {} (요청: {})", status, resp_body, body_str));
     }
     Ok(())
 }
 
 /// 채팅 공지 등록
-pub async fn register_chat_notice(access_token: &str, message: &str) -> Result<(), String> {
+pub async fn register_chat_notice(access_token: &str, message: &str) -> Result<String, String> {
     let client = reqwest::Client::new();
     let resp = client
         .post(format!("{}/open/v1/chats/notice", BASE_URL))
@@ -208,11 +211,11 @@ pub async fn register_chat_notice(access_token: &str, message: &str) -> Result<(
         .await
         .map_err(|e| format!("{e}"))?;
     let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
     if !status.is_success() {
-        let body = resp.text().await.unwrap_or_default();
         return Err(format!("공지 등록 실패 ({}): {}", status, body));
     }
-    Ok(())
+    Ok(body)
 }
 
 /// 카테고리 검색

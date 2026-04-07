@@ -4,6 +4,7 @@ mod api;
 mod bot;
 mod db;
 mod gui;
+mod sr;
 mod ws;
 
 use std::sync::Arc;
@@ -17,10 +18,15 @@ async fn start_bot(shared: Shared, db: Db) {
         st.bot_should_stop = false;
         st.log("봇 자동 시작...");
     }
+    // SR 대기열 복원
+    sr::restore_queue(&shared, &db);
     let (s2, d2) = (shared.clone(), db.clone());
     tokio::spawn(async move { ws::event_loop(s2, d2).await; });
-    let (s3, d3) = (shared, db);
+    let (s3, d3) = (shared.clone(), db.clone());
     tokio::spawn(async move { api::channel_info_loop(s3, d3).await; });
+    let sr_port: u16 = db::get_setting(&db, app::SETTING_SR_PORT).parse().unwrap_or(8081);
+    let (s4, d4) = (shared, db);
+    tokio::spawn(async move { sr::start_sr_server(s4, d4, sr_port).await; });
 }
 
 fn main() {

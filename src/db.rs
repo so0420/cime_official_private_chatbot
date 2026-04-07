@@ -59,6 +59,16 @@ pub fn init_db(db: &Db) {
             message    TEXT    NOT NULL,
             sort_order INTEGER DEFAULT 0
         );
+
+        CREATE TABLE IF NOT EXISTS sr_queue (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            video_id       TEXT    NOT NULL,
+            video_title    TEXT    NOT NULL,
+            video_duration INTEGER DEFAULT 0,
+            requester      TEXT    NOT NULL,
+            status         TEXT    DEFAULT 'queued',
+            created_at     TEXT    DEFAULT (datetime('now', '+9 hours'))
+        );
         ",
     )
     .expect("테이블 생성 실패");
@@ -77,6 +87,9 @@ pub fn init_db(db: &Db) {
         (SETTING_SCMD_CATEGORY, "1"),
         (SETTING_SCMD_TAG, "1"),
         (SETTING_SUB_ENABLED, "1"),
+        (SETTING_SR_ENABLED, "1"),
+        (SETTING_SR_MAX_DURATION, "600"),
+        (SETTING_SR_PORT, "8081"),
     ];
     for (k, v) in &defaults {
         conn.execute(
@@ -365,4 +378,70 @@ pub fn save_subscription_rules(db: &Db, rules: &[crate::app::SubscriptionRule]) 
             params![rule.tier_no, rule.message, i as i32],
         ).ok();
     }
+}
+
+// ── SR Queue ──
+
+pub fn sr_add(db: &Db, video_id: &str, title: &str, duration: i64, requester: &str) {
+    let conn = db.lock().unwrap();
+    conn.execute(
+        "INSERT INTO sr_queue(video_id, video_title, video_duration, requester) VALUES(?1,?2,?3,?4)",
+        params![video_id, title, duration, requester],
+    ).ok();
+}
+
+pub fn sr_peek_next(db: &Db) -> Option<crate::app::SrQueueItem> {
+    let conn = db.lock().unwrap();
+    conn.query_row(
+        "SELECT id, video_id, video_title, video_duration, requester, status FROM sr_queue WHERE status='queued' ORDER BY id LIMIT 1",
+        [],
+        |r| Ok(crate::app::SrQueueItem {
+            id: r.get(0)?, video_id: r.get(1)?, video_title: r.get(2)?,
+            video_duration: r.get(3)?, requester: r.get(4)?, status: r.get(5)?,
+        }),
+    ).ok()
+}
+
+pub fn sr_set_playing(db: &Db, id: i64) {
+    let conn = db.lock().unwrap();
+    conn.execute("UPDATE sr_queue SET status='playing' WHERE id=?1", params![id]).ok();
+}
+
+pub fn sr_remove_current(db: &Db) {
+    let conn = db.lock().unwrap();
+    conn.execute("DELETE FROM sr_queue WHERE status='playing'", []).ok();
+}
+
+pub fn sr_list(db: &Db, limit: i64) -> Vec<crate::app::SrQueueItem> {
+    let conn = db.lock().unwrap();
+    let mut stmt = conn.prepare(
+        "SELECT id, video_id, video_title, video_duration, requester, status FROM sr_queue ORDER BY CASE status WHEN 'playing' THEN 0 ELSE 1 END, id LIMIT ?1"
+    ).unwrap();
+    stmt.query_map(params![limit], |r| Ok(crate::app::SrQueueItem {
+        id: r.get(0)?, video_id: r.get(1)?, video_title: r.get(2)?,
+        video_duration: r.get(3)?, requester: r.get(4)?, status: r.get(5)?,
+    })).unwrap().filter_map(|r| r.ok()).collect()
+}
+
+pub fn sr_remove(db: &Db, id: i64) {
+    let conn = db.lock().unwrap();
+    conn.execute("DELETE FROM sr_queue WHERE id=?1", params![id]).ok();
+}
+
+pub fn sr_clear(db: &Db) {
+    let conn = db.lock().unwrap();
+    conn.execute("DELETE FROM sr_queue", []).ok();
+}
+
+pub fn sr_count_by_user(db: &Db, requester: &str) -> i64 {
+    let conn = db.lock().unwrap();
+    conn.query_row(
+        "SELECT COUNT(*) FROM sr_queue WHERE requester=?1 AND status='queued'",
+        params![requester], |r| r.get(0),
+    ).unwrap_or(0)
+}
+
+pub fn sr_queue_count(db: &Db) -> i64 {
+    let conn = db.lock().unwrap();
+    conn.query_row("SELECT COUNT(*) FROM sr_queue WHERE status='queued'", [], |r| r.get(0)).unwrap_or(0)
 }

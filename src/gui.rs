@@ -27,6 +27,7 @@ enum Tab {
     Commands,
     Donation,
     Subscription,
+    Sr,
     Settings,
     Logs,
 }
@@ -73,6 +74,13 @@ pub struct BotGui {
     sub_tier: String,
     sub_msg: String,
 
+    // SR
+    sr_enabled: bool,
+    sr_max_duration: String,
+    sr_queue: Vec<crate::app::SrQueueItem>,
+    sr_dirty: bool,
+    sr_loaded: bool,
+
     // 설정
     attendance_reset_hour: String,
     settings_loaded: bool,
@@ -111,6 +119,7 @@ impl BotGui {
             scmd_title: true, scmd_notice: true, scmd_category: true, scmd_tag: true, scmd_loaded: false,
             sub_enabled: true, sub_rules: vec![], sub_dirty: true, sub_loaded: false,
             sub_tier: "1".into(), sub_msg: String::new(),
+            sr_enabled: true, sr_max_duration: "600".into(), sr_queue: vec![], sr_dirty: true, sr_loaded: false,
             attendance_reset_hour: "5".into(), settings_loaded: false,
             log_auto_scroll: true,
         }
@@ -301,6 +310,7 @@ impl eframe::App for BotGui {
                 (Tab::Commands, "명령어"),
                 (Tab::Donation, "후원"),
                 (Tab::Subscription, "구독"),
+                (Tab::Sr, "노래신청"),
                 (Tab::Settings, "설정"),
                 (Tab::Logs, "로그"),
             ];
@@ -322,6 +332,7 @@ impl eframe::App for BotGui {
                         Tab::Commands => self.commands_dirty = true,
                         Tab::Donation => self.donation_dirty = true,
                         Tab::Subscription => self.sub_dirty = true,
+                        Tab::Sr => self.sr_dirty = true,
                         _ => {}
                     }
                 }
@@ -360,6 +371,7 @@ impl eframe::App for BotGui {
                 Tab::Commands => self.draw_commands(ui),
                 Tab::Donation => self.draw_donation(ui),
                 Tab::Subscription => self.draw_subscription(ui),
+                Tab::Sr => self.draw_sr(ui),
                 Tab::Settings => self.draw_settings(ui),
                 Tab::Logs => self.draw_logs(ui),
             }
@@ -372,10 +384,15 @@ impl BotGui {
         let shared = self.shared.clone();
         let db = self.db.clone();
         { let mut st = shared.lock().unwrap(); st.bot_running = true; st.bot_should_stop = false; st.log("봇 시작..."); }
+        crate::sr::restore_queue(&shared, &db);
         let (s2, d2) = (shared.clone(), db.clone());
         self.rt.spawn(async move { crate::ws::event_loop(s2, d2).await; });
-        let (s3, d3) = (shared, db);
+        let (s3, d3) = (shared.clone(), db.clone());
         self.rt.spawn(async move { crate::api::channel_info_loop(s3, d3).await; });
+        // SR 오버레이 서버
+        let sr_port: u16 = db::get_setting(&self.db, SETTING_SR_PORT).parse().unwrap_or(8081);
+        let (s4, d4) = (shared, db);
+        self.rt.spawn(async move { crate::sr::start_sr_server(s4, d4, sr_port).await; });
     }
 
     // ── 로그인 ──
@@ -470,7 +487,7 @@ impl BotGui {
             ui.add_space(2.0);
             ui.label("3. 위 필드에 입력 후 로그인 버튼을 누르세요.");
             ui.add_space(6.0);
-            hint(ui, "필요 권한: READ:LIVE_CHAT, WRITE:LIVE_CHAT, READ:DONATION, READ:USER, READ:CHANNEL, READ:LIVE_STREAM_SETTINGS");
+            hint(ui, "필요 권한: READ:LIVE_CHAT, WRITE:LIVE_CHAT, WRITE:LIVE_CHAT_NOTICE, READ:DONATION, READ:SUBSCRIPTION, READ:USER, READ:CHANNEL, READ:LIVE_STREAM_SETTINGS, WRITE:LIVE_STREAM_SETTINGS");
         });
     }
 
@@ -721,6 +738,149 @@ impl BotGui {
                 rules.remove(idx);
                 db::save_subscription_rules(&self.db, &rules);
                 self.sub_dirty = true;
+            }
+        });
+    }
+
+    // ── 노래신청 (SR) ──
+    fn draw_sr(&mut self, ui: &mut egui::Ui) {
+        if !self.sr_loaded {
+            self.sr_enabled = db::get_setting(&self.db, SETTING_SR_ENABLED) == "1";
+            self.sr_max_duration = db::get_setting(&self.db, SETTING_SR_MAX_DURATION);
+            if self.sr_max_duration.is_empty() { self.sr_max_duration = "600".into(); }
+            self.sr_loaded = true;
+        }
+        // 큐 변경 감지 + 설정 동기화
+        {
+            let mut st = self.shared.lock().unwrap();
+            if st.sr_queue_changed { self.sr_dirty = true; st.sr_queue_changed = false; }
+        }
+        // 채팅에서 on/off 변경 시 동기화
+        self.sr_enabled = db::get_setting(&self.db, SETTING_SR_ENABLED) == "1";
+        if self.sr_dirty {
+            self.sr_queue = db::sr_list(&self.db, 50);
+            self.sr_dirty = false;
+        }
+
+        section_heading(ui, "노래신청 (SR)");
+
+        // 설정
+        card(ui, |ui| {
+            ui.horizontal(|ui| {
+                if ui.checkbox(&mut self.sr_enabled, "노래신청 활성화").changed() {
+                    db::set_setting(&self.db, SETTING_SR_ENABLED, if self.sr_enabled { "1" } else { "0" });
+                }
+            });
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("최대 길이(초)").color(DIM).size(12.0));
+                ui.add(egui::TextEdit::singleline(&mut self.sr_max_duration).desired_width(60.0));
+                if accent_button(ui, "저장").clicked() {
+                    db::set_setting(&self.db, SETTING_SR_MAX_DURATION, &self.sr_max_duration);
+                    let mut st = self.shared.lock().unwrap();
+                    st.log(&format!("[SR] 최대 길이: {}초", self.sr_max_duration));
+                }
+            });
+            hint(ui, "채팅 명령어: !sr <URL 또는 키워드>  |  !sr skip/pause/resume/stop/volume  |  !sl");
+        });
+
+        ui.add_space(8.0);
+
+        // 현재 재생
+        card(ui, |ui| {
+            sub_heading(ui, "현재 재생");
+            let (cmd, title, requester) = {
+                let st = self.shared.lock().unwrap();
+                (st.sr_command.clone(), st.sr_current_title.clone(), st.sr_current_requester.clone())
+            };
+            if let Some(t) = &title {
+                ui.horizontal(|ui| {
+                    let status_text = match cmd.as_deref() {
+                        Some("play") => "▶",
+                        Some("pause") => "⏸",
+                        _ => "⏹",
+                    };
+                    ui.label(egui::RichText::new(status_text).size(18.0));
+                    ui.vertical(|ui| {
+                        ui.label(egui::RichText::new(t).strong());
+                        if let Some(r) = &requester {
+                            ui.label(egui::RichText::new(format!("신청: {}", r)).size(12.0).color(DIM));
+                        }
+                    });
+                });
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if accent_button(ui, "다음").clicked() { crate::sr::play_next(&self.shared, &self.db); self.sr_dirty = true; }
+                    if brown_button(ui, "일시정지").clicked() { self.shared.lock().unwrap().sr_command = Some("pause".into()); }
+                    if brown_button(ui, "재개").clicked() { self.shared.lock().unwrap().sr_command = Some("resume".into()); }
+                    if danger_button(ui, "정지").clicked() {
+                        let mut st = self.shared.lock().unwrap();
+                        st.sr_command = Some("stop".into()); st.sr_current_video_id = None; st.sr_current_title = None; st.sr_current_requester = None;
+                    }
+                });
+            } else {
+                ui.label(egui::RichText::new("재생 중인 곡이 없습니다.").color(DIM));
+            }
+        });
+
+        ui.add_space(8.0);
+
+        // 오버레이 경로
+        card(ui, |ui| {
+            sub_heading(ui, "오버레이");
+            let port: u16 = db::get_setting(&self.db, SETTING_SR_PORT).parse().unwrap_or(8081);
+            let url = format!("http://127.0.0.1:{}", port);
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("URL:").color(DIM));
+                ui.monospace(&url);
+                if ui.button("복사").clicked() { ui.output_mut(|o| o.copied_text = url.clone()); }
+            });
+            hint(ui, "OBS 브라우저 소스에 위 URL을 입력하세요. (봇 실행 중에만 작동)");
+        });
+
+        ui.add_space(8.0);
+
+        // 대기열
+        card(ui, |ui| {
+            ui.horizontal(|ui| {
+                sub_heading(ui, "대기열");
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if danger_button(ui, "전체 삭제").clicked() {
+                        db::sr_clear(&self.db); self.sr_dirty = true;
+                    }
+                    if ui.button("새로고침").clicked() { self.sr_dirty = true; }
+                });
+            });
+            ui.add_space(4.0);
+
+            if self.sr_queue.is_empty() {
+                ui.label(egui::RichText::new("대기열이 비어있습니다.").color(DIM));
+            } else {
+                egui::ScrollArea::vertical().max_height(250.0).show(ui, |ui| {
+                    let queue = self.sr_queue.clone();
+                    let mut to_delete: Option<i64> = None;
+                    for (i, song) in queue.iter().enumerate() {
+                        ui.horizontal(|ui| {
+                            let prefix = if song.status == "playing" {
+                                egui::RichText::new("▶").color(GREEN)
+                            } else {
+                                egui::RichText::new(format!("{}.", i + 1)).color(DIM)
+                            };
+                            ui.label(prefix);
+                            ui.label(&song.video_title);
+                            ui.label(egui::RichText::new(format!("({})", crate::sr::format_duration(song.video_duration))).size(11.0).color(DIM));
+                            ui.label(egui::RichText::new(&song.requester).size(11.0).color(DIM));
+                            if song.status != "playing" {
+                                if ui.small_button(egui::RichText::new("x").color(RED)).clicked() {
+                                    to_delete = Some(song.id);
+                                }
+                            }
+                        });
+                    }
+                    if let Some(id) = to_delete {
+                        db::sr_remove(&self.db, id); self.sr_dirty = true;
+                    }
+                });
             }
         });
     }

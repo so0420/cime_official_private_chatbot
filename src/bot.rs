@@ -1,6 +1,7 @@
 use crate::api;
 use crate::app::*;
 use crate::db::{self, Db};
+use crate::sr;
 
 /// 업타임 계산
 pub fn calc_uptime(opened_at: &str) -> String {
@@ -157,6 +158,12 @@ pub async fn handle_chat(shared: &Shared, db: &Db, event: &ChatEvent) {
         }
     }
 
+    // SR 명령어 처리
+    if trigger == "!sr" || trigger == "!SR" || trigger == "!sl" || trigger == "!SL" {
+        handle_sr_command(shared, db, trigger, args, &event.sender_nickname, &event.sender_channel_id).await;
+        return;
+    }
+
     // 기존 명령어 처리
     let command = db::find_command(db, content);
     let Some(command) = command else { return };
@@ -258,13 +265,19 @@ async fn handle_streamer_command(shared: &Shared, db: &Db, trigger: &str, args: 
         }
         "!공지" if db::get_setting(db, SETTING_SCMD_NOTICE) == "1" => {
             match api::register_chat_notice(&access_token, args).await {
-                Ok(()) => {
-                    let mut st = shared.lock().unwrap();
-                    st.log(&format!("[공지] 등록: {}", args));
+                Ok(resp) => {
+                    {
+                        let mut st = shared.lock().unwrap();
+                        st.log(&format!("[공지] 등록: {} (응답: {})", args, &resp[..resp.len().min(100)]));
+                    }
+                    let _ = api::send_chat(&access_token, &format!("공지가 등록되었습니다: {}", args)).await;
                 }
                 Err(e) => {
-                    let mut st = shared.lock().unwrap();
-                    st.log(&format!("[공지] 등록 실패: {e}"));
+                    {
+                        let mut st = shared.lock().unwrap();
+                        st.log(&format!("[공지] 등록 실패: {e}"));
+                    }
+                    let _ = api::send_chat(&access_token, &format!("공지 등록 실패: {}", e)).await;
                 }
             }
             true
@@ -277,6 +290,11 @@ async fn handle_streamer_command(shared: &Shared, db: &Db, trigger: &str, args: 
                         .find(|c| c.category_value == args)
                         .or_else(|| cats.iter().find(|c| c.category_value.contains(args)))
                         .unwrap_or(&cats[0]);
+
+                    {
+                        let mut st = shared.lock().unwrap();
+                        st.log(&format!("[카테고리] 검색 결과: id={}, value={}", best.category_id, best.category_value));
+                    }
 
                     match api::update_live_setting(&access_token, None, Some(&best.category_id), None).await {
                         Ok(()) => {
@@ -392,6 +410,117 @@ pub async fn handle_donation(shared: &Shared, db: &Db, event: &DonationEvent) {
         }
     }
 
+}
+
+/// SR 명령어 처리
+async fn handle_sr_command(shared: &Shared, db: &Db, trigger: &str, args: &str, sender: &str, sender_cid: &str) {
+    let access_token = { shared.lock().unwrap().access_token.clone().unwrap_or_default() };
+    if access_token.is_empty() { return; }
+
+    let is_streamer = {
+        let st = shared.lock().unwrap();
+        st.channel_id.as_deref() == Some(sender_cid)
+    };
+
+    // !sl - 현재 재생 정보
+    if trigger == "!sl" || trigger == "!SL" {
+        let (title, requester) = {
+            let st = shared.lock().unwrap();
+            (st.sr_current_title.clone(), st.sr_current_requester.clone())
+        };
+        let count = db::sr_queue_count(db);
+        let msg = if let Some(t) = title {
+            let r = requester.unwrap_or_default();
+            format!("현재 재생: {} ({}) | 대기: {}곡", t, r, count)
+        } else {
+            "현재 재생 중인 곡이 없습니다.".to_string()
+        };
+        let _ = api::send_chat(&access_token, &msg).await;
+        return;
+    }
+
+    // !sr 서브커맨드 (스트리머/매니저 전용)
+    if is_streamer {
+        match args {
+            "on" | "열기" => {
+                db::set_setting(db, SETTING_SR_ENABLED, "1");
+                let _ = api::send_chat(&access_token, "노래신청이 활성화되었습니다.").await;
+                return;
+            }
+            "off" | "닫기" => {
+                db::set_setting(db, SETTING_SR_ENABLED, "0");
+                let _ = api::send_chat(&access_token, "노래신청이 비활성화되었습니다.").await;
+                return;
+            }
+            "skip" | "다음" | "next" | "건너뛰기" => {
+                sr::play_next(shared, db);
+                let _ = api::send_chat(&access_token, "다음 곡으로 넘어갑니다.").await;
+                return;
+            }
+            "pause" | "중지" | "일시정지" => {
+                { let mut st = shared.lock().unwrap(); st.sr_command = Some("pause".into()); st.log("[SR] 일시정지"); }
+                return;
+            }
+            "resume" | "재개" | "재생" | "play" | "start" | "시작" => {
+                let has_current = { shared.lock().unwrap().sr_current_video_id.is_some() };
+                if has_current {
+                    { let mut st = shared.lock().unwrap(); st.sr_command = Some("resume".into()); st.log("[SR] 재개"); }
+                } else {
+                    sr::play_next(shared, db);
+                }
+                return;
+            }
+            "stop" | "종료" => {
+                { let mut st = shared.lock().unwrap(); st.sr_command = Some("stop".into()); st.sr_current_video_id = None; st.sr_current_title = None; st.sr_current_requester = None; st.log("[SR] 종료"); }
+                return;
+            }
+            _ if args.starts_with("volume ") || args.starts_with("소리 ") || args.starts_with("볼륨 ") => {
+                let vol_str = args.split_whitespace().nth(1).unwrap_or("50");
+                if let Ok(v) = vol_str.parse::<i32>() {
+                    let vol = v.clamp(0, 100);
+                    { let mut st = shared.lock().unwrap(); st.sr_volume = vol; st.log(&format!("[SR] 볼륨: {}", vol)); }
+                }
+                return;
+            }
+            _ => {}
+        }
+    }
+
+    // !sr <URL 또는 키워드> - 곡 추가 (비활성화 시 거부)
+    let enabled = db::get_setting(db, SETTING_SR_ENABLED);
+    if enabled != "1" {
+        let _ = api::send_chat(&access_token, "노래신청이 비활성화 상태입니다.").await;
+        return;
+    }
+    if args.is_empty() { return; }
+
+    let max_duration: i64 = db::get_setting(db, SETTING_SR_MAX_DURATION).parse().unwrap_or(600);
+
+    {
+        let mut st = shared.lock().unwrap();
+        st.log(&format!("[SR] {}님 요청: {}", sender, args));
+    }
+
+    match sr::get_video_info(args).await {
+        Ok(info) => {
+            if info.duration > max_duration && max_duration > 0 {
+                let msg = format!("{}는 {}로 최대 길이({})를 초과합니다.",
+                    info.title, sr::format_duration(info.duration), sr::format_duration(max_duration));
+                let _ = api::send_chat(&access_token, &msg).await;
+                return;
+            }
+            let title_short: String = info.title.chars().take(40).collect();
+            sr::add_and_maybe_play(shared, db, &info.video_id, &info.title, info.duration, sender);
+            let count = db::sr_queue_count(db);
+            let msg = format!("{} ({}) 추가됨 (대기: {}곡)", title_short, sr::format_duration(info.duration), count);
+            let _ = api::send_chat(&access_token, &msg).await;
+        }
+        Err(e) => {
+            let _ = api::send_chat(&access_token, &format!("SR 실패: {}", e)).await;
+            let mut st = shared.lock().unwrap();
+            st.log(&format!("[SR] 실패: {e}"));
+        }
+    }
 }
 
 /// 구독 이벤트 처리

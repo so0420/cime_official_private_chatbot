@@ -35,6 +35,14 @@ pub struct SharedState {
     pub category: String,
     pub opened_at: Option<String>,
 
+    // SR (노래신청)
+    pub sr_queue_changed: bool,
+    pub sr_command: Option<String>,
+    pub sr_current_video_id: Option<String>,
+    pub sr_current_title: Option<String>,
+    pub sr_current_requester: Option<String>,
+    pub sr_volume: i32,
+
     // Logs
     pub logs: VecDeque<String>,
 }
@@ -58,6 +66,12 @@ impl Default for SharedState {
             live_title: String::new(),
             category: String::new(),
             opened_at: None,
+            sr_queue_changed: false,
+            sr_command: None,
+            sr_current_video_id: None,
+            sr_current_title: None,
+            sr_current_requester: None,
+            sr_volume: 50,
             logs: VecDeque::with_capacity(500),
         }
     }
@@ -264,6 +278,21 @@ pub const SETTING_SCMD_TAG: &str = "scmd_tag";
 
 // 구독
 pub const SETTING_SUB_ENABLED: &str = "subscription_enabled";
+
+// SR
+pub const SETTING_SR_ENABLED: &str = "sr_enabled";
+pub const SETTING_SR_MAX_DURATION: &str = "sr_max_duration";
+pub const SETTING_SR_PORT: &str = "sr_port";
+
+#[derive(Debug, Clone)]
+pub struct SrQueueItem {
+    pub id: i64,
+    pub video_id: String,
+    pub video_title: String,
+    pub video_duration: i64,
+    pub requester: String,
+    pub status: String,
+}
 
 pub const BASE_URL: &str = "https://ci.me/api/openapi";
 pub const AUTH_URL: &str = "https://ci.me/auth/openapi/account-interlock";
