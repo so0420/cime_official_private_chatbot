@@ -4,16 +4,13 @@ use crate::db::{self, Db};
 use crate::sr;
 
 /// 스트리머 또는 매니저 권한 확인
-const PRIVILEGED_SLUGS: &[&str] = &["so0420", "jamkubot", "jamku_manager"];
+const PRIVILEGED_IDS: &[&str] = &["1000408", "1000512", "1000464"]; // so0420, jamkubot, jamku_manager
 
-fn is_privileged(shared: &Shared, sender_channel_id: &str, sender_slug: Option<&str>) -> bool {
+fn is_privileged(shared: &Shared, sender_channel_id: &str) -> bool {
     let st = shared.lock().unwrap();
     if st.channel_id.as_deref() == Some(sender_channel_id) { return true; }
     if st.manager_channel_ids.contains(sender_channel_id) { return true; }
-    if let Some(slug) = sender_slug {
-        if PRIVILEGED_SLUGS.contains(&slug) { return true; }
-    }
-    false
+    PRIVILEGED_IDS.contains(&sender_channel_id)
 }
 
 /// 카테고리 별칭 → 실제 검색어 변환
@@ -189,7 +186,7 @@ pub async fn handle_chat(shared: &Shared, db: &Db, event: &ChatEvent) {
 
     // 스트리머 명령어 처리 (인자가 있을 때만)
     if !args.is_empty() {
-        let is_streamer = is_privileged(shared, &event.sender_channel_id, event.sender_slug.as_deref());
+        let is_streamer = is_privileged(shared, &event.sender_channel_id);
         if is_streamer {
             let handled = handle_streamer_command(shared, db, trigger, args).await;
             if handled { return; }
@@ -198,7 +195,7 @@ pub async fn handle_chat(shared: &Shared, db: &Db, event: &ChatEvent) {
 
     // SR 명령어 처리
     if trigger == "!sr" || trigger == "!SR" || trigger == "!sl" || trigger == "!SL" {
-        handle_sr_command(shared, db, trigger, args, &event.sender_nickname, &event.sender_channel_id, event.sender_slug.as_deref()).await;
+        handle_sr_command(shared, db, trigger, args, &event.sender_nickname, &event.sender_channel_id).await;
         return;
     }
 
@@ -449,11 +446,11 @@ pub async fn handle_donation(shared: &Shared, db: &Db, event: &DonationEvent) {
 }
 
 /// SR 명령어 처리
-async fn handle_sr_command(shared: &Shared, db: &Db, trigger: &str, args: &str, sender: &str, sender_cid: &str, sender_slug: Option<&str>) {
+async fn handle_sr_command(shared: &Shared, db: &Db, trigger: &str, args: &str, sender: &str, sender_cid: &str) {
     let access_token = { shared.lock().unwrap().access_token.clone().unwrap_or_default() };
     if access_token.is_empty() { return; }
 
-    let is_streamer = is_privileged(shared, sender_cid, sender_slug);
+    let is_streamer = is_privileged(shared, sender_cid);
 
     // !sl - 현재 재생 정보
     if trigger == "!sl" || trigger == "!SL" {
