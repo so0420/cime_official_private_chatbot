@@ -962,12 +962,11 @@ impl BotGui {
             for timer in &timers {
                 card(ui, |ui| {
                     ui.horizontal(|ui| {
-                        tag(ui, &format!("{}분 간격", timer.interval_minutes), TAG_BLUE);
-                        if timer.enabled {
-                            tag(ui, "활성", ACCENT);
-                        } else {
-                            tag(ui, "비활성", DIM);
+                        let mut enabled = timer.enabled;
+                        if ui.add(egui::Checkbox::without_text(&mut enabled)).changed() {
+                            db::set_timer_enabled(&self.db, timer.id, enabled); self.timer_dirty = true;
                         }
+                        tag(ui, &format!("{}분 간격", timer.interval_minutes), BROWN);
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui.small_button(egui::RichText::new("삭제").size(11.0).color(RED)).clicked() {
                                 db::delete_timer_message(&self.db, timer.id); self.timer_dirty = true;
@@ -976,10 +975,6 @@ impl BotGui {
                                 self.editing_timer_id = Some(timer.id);
                                 self.timer_msg = timer.message.clone();
                                 self.timer_interval = timer.interval_minutes.to_string();
-                            }
-                            let toggle_text = if timer.enabled { "비활성화" } else { "활성화" };
-                            if ui.small_button(egui::RichText::new(toggle_text).size(11.0).color(if timer.enabled { TAG_AMBER } else { GREEN })).clicked() {
-                                db::set_timer_enabled(&self.db, timer.id, !timer.enabled); self.timer_dirty = true;
                             }
                         });
                     });
