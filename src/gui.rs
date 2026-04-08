@@ -847,19 +847,26 @@ impl BotGui {
                         }
                     });
                 });
-                ui.add_space(4.0);
-                ui.horizontal(|ui| {
-                    if accent_button(ui, "다음").clicked() { crate::sr::play_next(&self.shared, &self.db); self.sr_dirty = true; }
-                    if brown_button(ui, "재생/재개").clicked() { self.shared.lock().unwrap().sr_command = Some("resume".into()); }
-                    if brown_button(ui, "일시정지").clicked() { self.shared.lock().unwrap().sr_command = Some("pause".into()); }
-                    if danger_button(ui, "정지").clicked() {
-                        let mut st = self.shared.lock().unwrap();
-                        st.sr_command = Some("stop".into()); st.sr_current_video_id = None; st.sr_current_title = None; st.sr_current_requester = None;
-                    }
-                });
             } else {
                 ui.label(egui::RichText::new("재생 중인 곡이 없습니다.").color(DIM));
             }
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                if accent_button(ui, "다음").clicked() { crate::sr::play_next(&self.shared, &self.db); self.sr_dirty = true; }
+                if brown_button(ui, "재생/재개").clicked() {
+                    let has_current = { self.shared.lock().unwrap().sr_current_video_id.is_some() };
+                    if has_current {
+                        self.shared.lock().unwrap().sr_command = Some("resume".into());
+                    } else {
+                        crate::sr::play_next(&self.shared, &self.db); self.sr_dirty = true;
+                    }
+                }
+                if brown_button(ui, "일시정지").clicked() { self.shared.lock().unwrap().sr_command = Some("pause".into()); }
+                if danger_button(ui, "정지").clicked() {
+                    let mut st = self.shared.lock().unwrap();
+                    st.sr_command = Some("stop".into()); st.sr_current_video_id = None; st.sr_current_title = None; st.sr_current_requester = None;
+                }
+            });
         });
 
         ui.add_space(8.0);
