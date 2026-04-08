@@ -146,6 +146,9 @@ function createPlayer(videoId){{
     events:{{
       onStateChange:e=>{{
         if(e.data===YT.PlayerState.ENDED)fetch('http://127.0.0.1:'+PORT+'/api/sr/ended',{{method:'POST'}}).catch(()=>{{}})
+      }},
+      onError:e=>{{
+        fetch('http://127.0.0.1:'+PORT+'/api/sr/ended',{{method:'POST'}}).catch(()=>{{}})
       }}
     }}
   }});
