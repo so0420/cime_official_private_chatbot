@@ -255,12 +255,17 @@ fn parse_donation_event(data: &serde_json::Value) -> Option<DonationEvent> {
     })
 }
 
+fn parse_i32(v: &serde_json::Value) -> Option<i32> {
+    v.as_i64().map(|n| n as i32)
+        .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+}
+
 fn parse_subscription_event(data: &serde_json::Value) -> Option<crate::app::SubscriptionEvent> {
     let channel_id = data.get("channelId")?.as_str()?.to_string();
     let subscriber_channel_id = data.get("subscriberChannelId")?.as_str()?.to_string();
     let subscriber_channel_name = data.get("subscriberChannelName")?.as_str()?.to_string();
-    let month = data.get("month")?.as_i64()? as i32;
-    let tier_no = data.get("tierNo")?.as_i64()? as i32;
+    let month = data.get("month").and_then(parse_i32).unwrap_or(1);
+    let tier_no = data.get("tierNo").and_then(parse_i32).unwrap_or(1);
     let subscription_message = data
         .get("subscriptionMessage")
         .and_then(|v| v.as_str())
