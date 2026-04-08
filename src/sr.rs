@@ -129,42 +129,54 @@ body{{background:transparent;overflow:hidden}}
 <div id="info"><span id="title"></span> <span id="req" style="color:#aaa;font-size:12px"></span></div>
 <div id="wrap"><div id="player"></div></div>
 <script>
-let player=null, apiReady=false, currentId=null, playing=false, createTime=0, everPlayed=false;
+let player=null, playerReady=false, currentId=null, playing=false;
+let ignoreEndEvent=false, loadTime=0, everPlayed=false;
 const PORT={port};
 
 function skipToNext(){{
+  if(!currentId)return;
+  currentId=null;
   fetch('http://127.0.0.1:'+PORT+'/api/sr/ended',{{method:'POST'}}).catch(()=>{{}});
+  document.getElementById('wrap').classList.remove('show');
+  document.getElementById('info').classList.remove('show');
+  playing=false;
 }}
 
-// YouTube API 로드 완료 시 호출되지만, 플레이어는 아직 만들지 않음
-function onYouTubeIframeAPIReady(){{ apiReady=true; }}
-
-function createPlayer(videoId){{
-  // 기존 플레이어 제거
-  if(player){{player.destroy();player=null;}}
-  document.getElementById('wrap').classList.add('show');
-  everPlayed=false;
-  createTime=Date.now();
+function onYouTubeIframeAPIReady(){{
   player=new YT.Player('player',{{
+    host:'https://www.youtube-nocookie.com',
     width:'100%',height:'100%',
-    videoId:videoId,
-    playerVars:{{autoplay:1,controls:0,rel:0,modestbranding:1}},
+    videoId:'',
+    playerVars:{{autoplay:1,controls:0,rel:0,modestbranding:1,origin:window.location.origin}},
     events:{{
+      onReady:()=>{{ playerReady=true; }},
       onStateChange:e=>{{
-        if(e.data===YT.PlayerState.PLAYING)everPlayed=true;
-        if(e.data===YT.PlayerState.ENDED)skipToNext();
+        if(e.data===YT.PlayerState.PLAYING){{ everPlayed=true; ignoreEndEvent=false; }}
+        if(e.data===YT.PlayerState.ENDED){{
+          if(ignoreEndEvent)return;
+          skipToNext();
+        }}
       }},
-      onError:e=>{{
-        skipToNext();
-      }}
+      onError:e=>{{ skipToNext(); }}
     }}
   }});
+}}
+
+function loadVideo(videoId){{
+  if(!player||!playerReady)return;
+  ignoreEndEvent=true;
+  setTimeout(()=>{{ ignoreEndEvent=false; }},3000);
+  everPlayed=false;
+  loadTime=Date.now();
+  if(typeof player.stopVideo==='function')player.stopVideo();
   currentId=videoId;
+  player.loadVideoById(videoId);
+  document.getElementById('wrap').classList.add('show');
   playing=true;
 }}
 
 function hidePlayer(){{
-  if(player){{player.destroy();player=null;}}
+  if(player&&typeof player.stopVideo==='function')player.stopVideo();
   document.getElementById('wrap').classList.remove('show');
   document.getElementById('info').classList.remove('show');
   currentId=null;playing=false;
@@ -174,13 +186,11 @@ async function poll(){{
   try{{
     const r=await fetch('http://127.0.0.1:'+PORT+'/api/sr/state');
     const d=await r.json();
-    if(!apiReady)return;
+    if(!playerReady)return;
 
     if(d.command==='play'&&d.video_id){{
       if(d.video_id!==currentId){{
-        createPlayer(d.video_id);
-      }}else if(player){{
-        player.playVideo();
+        loadVideo(d.video_id);
       }}
       document.getElementById('title').textContent=d.title||'';
       document.getElementById('req').textContent=d.requester?'- '+d.requester:'';
@@ -188,8 +198,9 @@ async function poll(){{
     }}else if(d.command==='pause'&&player){{
       player.pauseVideo();
     }}else if(d.command==='resume'){{
-      if(player){{player.playVideo()}}
-      else if(d.video_id){{createPlayer(d.video_id);
+      if(currentId&&player){{player.playVideo()}}
+      else if(d.video_id&&d.video_id!==currentId){{
+        loadVideo(d.video_id);
         document.getElementById('title').textContent=d.title||'';
         document.getElementById('req').textContent=d.requester?'- '+d.requester:'';
         document.getElementById('info').classList.add('show');
@@ -197,10 +208,10 @@ async function poll(){{
     }}else if(d.command==='stop'||d.command==='idle'){{
       if(playing)hidePlayer();
     }}
-    if(player&&d.volume!==undefined&&d.volume!==null)player.setVolume(d.volume);
-    // 워치독: 10초 내 재생이 시작되지 않으면 자동 스킵
-    if(playing&&createTime&&!everPlayed&&(Date.now()-createTime>10000)){{
-      createTime=0;
+    if(player&&typeof player.setVolume==='function'&&d.volume!==undefined&&d.volume!==null)player.setVolume(d.volume);
+    // 워치독: 10초 내 재생 안 되면 자동 스킵
+    if(playing&&loadTime&&!everPlayed&&(Date.now()-loadTime>10000)){{
+      loadTime=0;
       skipToNext();
     }}
   }}catch(e){{}}
