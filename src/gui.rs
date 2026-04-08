@@ -875,11 +875,17 @@ impl BotGui {
         card(ui, |ui| {
             sub_heading(ui, "오버레이");
             let port: u16 = db::get_setting(&self.db, SETTING_SR_PORT).parse().unwrap_or(8081);
-            let url = format!("http://127.0.0.1:{}", port);
+            let url_player = format!("http://127.0.0.1:{}", port);
+            let url_list = format!("http://127.0.0.1:{}/list", port);
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("URL:").color(DIM));
-                ui.monospace(&url);
-                if ui.button("복사").clicked() { ui.output_mut(|o| o.copied_text = url.clone()); }
+                ui.label(egui::RichText::new("플레이어:").color(DIM));
+                ui.monospace(&url_player);
+                if ui.button("복사").clicked() { ui.output_mut(|o| o.copied_text = url_player.clone()); }
+            });
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("리스트:").color(DIM));
+                ui.monospace(&url_list);
+                if ui.button("복사").clicked() { ui.output_mut(|o| o.copied_text = url_list.clone()); }
             });
             hint(ui, "OBS 브라우저 소스에 위 URL을 입력하세요. (봇 실행 중에만 작동)");
         });

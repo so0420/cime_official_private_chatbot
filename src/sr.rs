@@ -234,6 +234,106 @@ setInterval(poll,1000);
 </body></html>"#, port=port)
 }
 
+fn sr_list_overlay_html(port: u16) -> String {
+    format!(r#"<!DOCTYPE html>
+<html lang="ko"><head><meta charset="UTF-8">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css"/>
+<style>
+:root{{--yellow:#FFD700;--white:#FFF;--gray:rgba(255,255,255,0.9);--bg:rgba(15,15,15,0.95);--bg-item:rgba(255,255,255,0.15);--r-lg:16px;--r-sm:8px}}
+*{{box-sizing:border-box}}
+body{{font-family:"Pretendard Variable",Pretendard,sans-serif;margin:0;padding:0;width:100vw;height:100vh;overflow:hidden;background:transparent;display:flex;justify-content:center;align-items:center}}
+.widget{{width:360px;display:flex;flex-direction:column;gap:12px;text-align:left}}
+.np-card{{background:var(--bg);border-radius:var(--r-lg);padding:14px 16px;backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.2);box-shadow:0 8px 32px rgba(0,0,0,0.5);display:flex;flex-direction:column;gap:8px;opacity:1;transform:translateY(0);transition:all .4s cubic-bezier(.2,.8,.2,1)}}
+.np-card.hidden{{opacity:0;transform:translateY(-10px);pointer-events:none}}
+.header{{display:flex;align-items:center;gap:8px}}
+.eq{{display:flex;align-items:flex-end;gap:3px;height:14px}}
+.bar{{width:3px;background:var(--yellow);border-radius:2px;animation:bounce 1s ease-in-out infinite}}
+.bar:nth-child(1){{height:60%;animation-duration:.8s}}
+.bar:nth-child(2){{height:100%;animation-duration:.9s}}
+.bar:nth-child(3){{height:50%;animation-duration:1.1s}}
+@keyframes bounce{{0%,100%{{transform:scaleY(.5);transform-origin:bottom}}50%{{transform:scaleY(1);transform-origin:bottom}}}}
+.header-text{{color:var(--yellow);font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase}}
+.content{{display:flex;align-items:center;gap:14px}}
+.thumb{{width:56px;height:56px;border-radius:var(--r-sm);object-fit:cover;box-shadow:0 4px 12px rgba(0,0,0,0.3);flex-shrink:0}}
+.info{{display:flex;flex-direction:column;overflow:hidden;flex:1}}
+.title{{font-size:14px;font-weight:700;color:var(--white);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:4px;line-height:1.2}}
+.req{{font-size:13px;color:var(--gray);font-weight:600;opacity:.95}}
+.queue{{display:flex;flex-direction:column;gap:6px}}
+.q-item{{background:var(--bg-item);border-radius:var(--r-sm);padding:10px 14px;display:flex;align-items:center;gap:12px;backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,0.05);opacity:0;transform:translateX(-10px);animation:slideIn .4s ease forwards}}
+@keyframes slideIn{{to{{opacity:1;transform:translateX(0)}}}}
+.rank{{font-size:14px;font-weight:800;color:rgba(255,255,255,0.6);min-width:18px;text-align:center}}
+.q-info{{display:flex;flex-direction:column;overflow:hidden;flex:1}}
+.q-title{{font-size:13px;font-weight:600;color:rgba(255,255,255,1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:2px}}
+.q-req{{font-size:11px;color:rgba(255,255,255,0.75)}}
+</style></head><body>
+<div class="widget">
+  <div id="np" class="np-card hidden">
+    <div class="header"><div class="eq"><div class="bar"></div><div class="bar"></div><div class="bar"></div></div><span class="header-text">Now Playing</span></div>
+    <div class="content">
+      <img id="np-art" class="thumb" src="" alt="">
+      <div class="info"><div id="np-title" class="title"></div><div id="np-req" class="req"></div></div>
+    </div>
+  </div>
+  <div id="queue" class="queue"></div>
+</div>
+<script>
+const PORT={port};
+let prevStateJson='', prevListJson='';
+
+async function poll(){{
+  try{{
+    const [sr, lr] = await Promise.all([
+      fetch('http://127.0.0.1:'+PORT+'/api/sr/state'),
+      fetch('http://127.0.0.1:'+PORT+'/api/sr/list')
+    ]);
+    const state = await sr.json();
+    const list = await lr.json();
+    const sj=JSON.stringify(state), lj=JSON.stringify(list);
+    if(sj===prevStateJson && lj===prevListJson) return;
+    prevStateJson=sj; prevListJson=lj;
+    renderNP(state);
+    renderQueue(list);
+  }}catch(e){{}}
+}}
+
+function renderNP(s){{
+  const card=document.getElementById('np');
+  const bars=document.querySelectorAll('.bar');
+  if(s.video_id && (s.command==='play'||s.command==='pause'||s.command==='resume')){{
+    card.classList.remove('hidden');
+    document.getElementById('np-art').src='https://img.youtube.com/vi/'+s.video_id+'/hqdefault.jpg';
+    document.getElementById('np-title').textContent=s.title||'';
+    document.getElementById('np-req').textContent=s.requester||'';
+    const paused=s.command==='pause';
+    bars.forEach(b=>b.style.animationPlayState=paused?'paused':'running');
+  }}else{{
+    card.classList.add('hidden');
+  }}
+}}
+
+function renderQueue(list){{
+  const c=document.getElementById('queue');
+  c.innerHTML='';
+  const items=list.slice(0,5);
+  items.forEach((item,i)=>{{
+    const el=document.createElement('div');
+    el.className='q-item';
+    el.style.animationDelay=(i*0.1)+'s';
+    el.innerHTML=`<div class="rank">${{i+1}}</div><div class="q-info"><div class="q-title">${{esc(item.title)}}</div><div class="q-req">${{esc(item.requester)}}</div></div>`;
+    c.appendChild(el);
+  }});
+}}
+
+function esc(s){{
+  if(!s)return'';
+  const d=document.createElement('div');d.textContent=s;return d.innerHTML;
+}}
+
+setInterval(poll,2000);
+poll();
+</script></body></html>"#, port=port)
+}
+
 /// 오버레이 HTML 파일을 디스크에 기록
 pub fn write_sr_overlay(port: u16) -> std::path::PathBuf {
     let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("."));
@@ -292,15 +392,21 @@ async fn handle_sr_request(mut stream: tokio::net::TcpStream, shared: &Shared, d
     let method = first_line.split_whitespace().next().unwrap_or("");
     let path = first_line.split_whitespace().nth(1).unwrap_or("/");
 
-    if method == "GET" && (path == "/" || path == "/index.html") {
-        // 오버레이 HTML 서빙
-        let html = sr_overlay_html(port);
-        let resp = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            html.len(), html
-        );
-        let _ = stream.write_all(resp.as_bytes()).await;
-        return;
+    // HTML 페이지 서빙
+    if method == "GET" {
+        let html = match path {
+            "/" | "/index.html" => Some(sr_overlay_html(port)),
+            "/list" => Some(sr_list_overlay_html(port)),
+            _ => None,
+        };
+        if let Some(html) = html {
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                html.len(), html
+            );
+            let _ = stream.write_all(resp.as_bytes()).await;
+            return;
+        }
     }
 
     let (status, body) = match (method, path) {
@@ -315,6 +421,27 @@ async fn handle_sr_request(mut stream: tokio::net::TcpStream, shared: &Shared, d
                 st.sr_volume,
             );
             ("200 OK", json)
+        }
+        ("GET", "/api/sr/list") => {
+            let queue = db::sr_list(db, 20);
+            let st = shared.lock().unwrap();
+            let current_vid = st.sr_current_video_id.clone();
+            drop(st);
+            let items: Vec<String> = queue.iter()
+                .filter(|s| {
+                    if let Some(cv) = &current_vid {
+                        !(s.status == "playing" && s.video_id == *cv)
+                    } else { true }
+                })
+                .map(|s| format!(
+                    r#"{{"id":{},"title":{},"requester":{},"duration":{}}}"#,
+                    s.id,
+                    opt_json_str(&Some(s.video_title.clone())),
+                    opt_json_str(&Some(s.requester.clone())),
+                    s.video_duration,
+                ))
+                .collect();
+            ("200 OK", format!("[{}]", items.join(",")))
         }
         ("POST", "/api/sr/ended") => {
             // 현재 곡 종료 → 다음 곡 재생
