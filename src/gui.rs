@@ -28,6 +28,7 @@ enum Tab {
     Donation,
     Subscription,
     Sr,
+    Timer,
     Settings,
     Logs,
 }
@@ -81,6 +82,14 @@ pub struct BotGui {
     sr_dirty: bool,
     sr_loaded: bool,
 
+    // 반복 메세지 (타이머)
+    timer_messages: Vec<TimerMessage>,
+    timer_name: String,
+    timer_msg: String,
+    timer_interval: String,
+    timer_dirty: bool,
+    editing_timer_id: Option<i64>,
+
     // 설정
     attendance_reset_hour: String,
     settings_loaded: bool,
@@ -120,6 +129,8 @@ impl BotGui {
             sub_enabled: true, sub_rules: vec![], sub_dirty: true, sub_loaded: false,
             sub_tier: "1".into(), sub_msg: String::new(),
             sr_enabled: true, sr_max_duration: "600".into(), sr_queue: vec![], sr_dirty: true, sr_loaded: false,
+            timer_messages: vec![], timer_name: String::new(), timer_msg: String::new(),
+            timer_interval: "5".into(), timer_dirty: true, editing_timer_id: None,
             attendance_reset_hour: "5".into(), settings_loaded: false,
             log_auto_scroll: true,
         }
@@ -311,6 +322,7 @@ impl eframe::App for BotGui {
                 (Tab::Donation, "후원"),
                 (Tab::Subscription, "구독"),
                 (Tab::Sr, "노래신청"),
+                (Tab::Timer, "반복 메세지"),
                 (Tab::Settings, "설정"),
                 (Tab::Logs, "로그"),
             ];
@@ -333,6 +345,7 @@ impl eframe::App for BotGui {
                         Tab::Donation => self.donation_dirty = true,
                         Tab::Subscription => self.sub_dirty = true,
                         Tab::Sr => self.sr_dirty = true,
+                        Tab::Timer => self.timer_dirty = true,
                         _ => {}
                     }
                 }
@@ -372,6 +385,7 @@ impl eframe::App for BotGui {
                 Tab::Donation => self.draw_donation(ui),
                 Tab::Subscription => self.draw_subscription(ui),
                 Tab::Sr => self.draw_sr(ui),
+                Tab::Timer => self.draw_timer(ui),
                 Tab::Settings => self.draw_settings(ui),
                 Tab::Logs => self.draw_logs(ui),
             }
@@ -391,8 +405,11 @@ impl BotGui {
         self.rt.spawn(async move { crate::api::channel_info_loop(s3, d3).await; });
         // SR 오버레이 서버
         let sr_port: u16 = db::get_setting(&self.db, SETTING_SR_PORT).parse().unwrap_or(8081);
-        let (s4, d4) = (shared, db);
+        let (s4, d4) = (shared.clone(), db.clone());
         self.rt.spawn(async move { crate::sr::start_sr_server(s4, d4, sr_port).await; });
+        // 반복 메세지 타이머
+        let (s5, d5) = (shared, db);
+        self.rt.spawn(async move { crate::bot::timer_loop(&s5, &d5).await; });
     }
 
     // ── 로그인 ──
@@ -881,6 +898,101 @@ impl BotGui {
                         db::sr_remove(&self.db, id); self.sr_dirty = true;
                     }
                 });
+            }
+        });
+    }
+
+    // ── 반복 메세지 (타이머) ──
+    fn reload_timer_messages(&mut self) { self.timer_messages = db::list_timer_messages(&self.db); self.timer_dirty = false; }
+
+    fn clear_timer_form(&mut self) {
+        self.timer_name.clear(); self.timer_msg.clear(); self.timer_interval = "5".into(); self.editing_timer_id = None;
+    }
+
+    fn draw_timer(&mut self, ui: &mut egui::Ui) {
+        if self.timer_dirty { self.reload_timer_messages(); }
+
+        section_heading(ui, "반복 메세지");
+        hint(ui, "설정한 간격(분)마다 자동으로 채팅에 메세지를 보냅니다. 봇 실행 중에만 동작합니다.");
+        ui.add_space(8.0);
+
+        card(ui, |ui| {
+            sub_heading(ui, if self.editing_timer_id.is_some() { "반복 메세지 수정" } else { "반복 메세지 추가" });
+            ui.add_space(4.0);
+
+            ui.label(egui::RichText::new("이름").color(DIM).size(12.0));
+            ui.add(egui::TextEdit::singleline(&mut self.timer_name).desired_width(f32::INFINITY).hint_text("예: 팔로우 안내"));
+            ui.add_space(2.0);
+
+            ui.label(egui::RichText::new("메세지").color(DIM).size(12.0));
+            ui.add(egui::TextEdit::multiline(&mut self.timer_msg).desired_width(f32::INFINITY).desired_rows(2).hint_text("채팅에 보낼 메세지를 입력하세요."));
+            ui.add_space(2.0);
+
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("간격").color(DIM).size(12.0));
+                ui.add(egui::TextEdit::singleline(&mut self.timer_interval).desired_width(50.0));
+                ui.label("분마다 반복");
+            });
+
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                if self.editing_timer_id.is_some() {
+                    if accent_button(ui, "수정 완료").clicked() {
+                        if let Some(id) = self.editing_timer_id {
+                            let interval: i64 = self.timer_interval.parse().unwrap_or(5).max(1);
+                            db::update_timer_message(&self.db, id, &self.timer_name, &self.timer_msg, interval, true);
+                            self.clear_timer_form(); self.timer_dirty = true;
+                        }
+                    }
+                    if ui.button("취소").clicked() { self.clear_timer_form(); }
+                } else {
+                    if accent_button(ui, "추가").clicked() {
+                        if !self.timer_name.is_empty() && !self.timer_msg.is_empty() {
+                            let interval: i64 = self.timer_interval.parse().unwrap_or(5).max(1);
+                            match db::add_timer_message(&self.db, &self.timer_name, &self.timer_msg, interval) {
+                                Ok(_) => { self.clear_timer_form(); self.timer_dirty = true; }
+                                Err(e) => { let mut st = self.shared.lock().unwrap(); st.log(&format!("타이머 추가 실패: {e}")); }
+                            }
+                        }
+                    }
+                }
+            });
+        });
+
+        ui.add_space(8.0);
+
+        // 목록
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            let timers = self.timer_messages.clone();
+            for timer in &timers {
+                card(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(&timer.name).strong().size(14.0).color(BROWN));
+                        tag(ui, &format!("{}분 간격", timer.interval_minutes), TAG_BLUE);
+                        if timer.enabled {
+                            tag(ui, "활성", ACCENT);
+                        } else {
+                            tag(ui, "비활성", DIM);
+                        }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.small_button(egui::RichText::new("삭제").size(11.0).color(RED)).clicked() {
+                                db::delete_timer_message(&self.db, timer.id); self.timer_dirty = true;
+                            }
+                            if ui.small_button(egui::RichText::new("수정").size(11.0)).clicked() {
+                                self.editing_timer_id = Some(timer.id);
+                                self.timer_name = timer.name.clone();
+                                self.timer_msg = timer.message.clone();
+                                self.timer_interval = timer.interval_minutes.to_string();
+                            }
+                            let toggle_text = if timer.enabled { "비활성화" } else { "활성화" };
+                            if ui.small_button(egui::RichText::new(toggle_text).size(11.0).color(if timer.enabled { TAG_AMBER } else { GREEN })).clicked() {
+                                db::set_timer_enabled(&self.db, timer.id, !timer.enabled); self.timer_dirty = true;
+                            }
+                        });
+                    });
+                    ui.label(&timer.message);
+                });
+                ui.add_space(2.0);
             }
         });
     }

@@ -260,6 +260,17 @@ pub struct CategorySearchResult {
     pub category_value: String,
 }
 
+// ── 반복 메세지 (타이머) ──
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimerMessage {
+    pub id: i64,
+    pub name: String,
+    pub message: String,
+    pub interval_minutes: i64,
+    pub enabled: bool,
+}
+
 // ── 설정 키 상수 ──
 
 pub const SETTING_CLIENT_ID: &str = "client_id";

@@ -263,14 +263,11 @@ async fn handle_streamer_command(shared: &Shared, db: &Db, trigger: &str, args: 
             }
             true
         }
-        "!공지" if db::get_setting(db, SETTING_SCMD_NOTICE) == "1" => {
+        "!공지" | "!고정" if db::get_setting(db, SETTING_SCMD_NOTICE) == "1" => {
             match api::register_chat_notice(&access_token, args).await {
                 Ok(resp) => {
-                    {
-                        let mut st = shared.lock().unwrap();
-                        st.log(&format!("[공지] 등록: {} (응답: {})", args, &resp[..resp.len().min(100)]));
-                    }
-                    let _ = api::send_chat(&access_token, &format!("공지가 등록되었습니다: {}", args)).await;
+                    let mut st = shared.lock().unwrap();
+                    st.log(&format!("[공지] 등록: {} (응답: {})", args, &resp[..resp.len().min(100)]));
                 }
                 Err(e) => {
                     {
@@ -520,6 +517,68 @@ async fn handle_sr_command(shared: &Shared, db: &Db, trigger: &str, args: &str, 
             let mut st = shared.lock().unwrap();
             st.log(&format!("[SR] 실패: {e}"));
         }
+    }
+}
+
+/// 반복 메세지 루프
+pub async fn timer_loop(shared: &Shared, db: &Db) {
+    use std::collections::HashMap;
+    use tokio::time::{sleep, Duration};
+
+    let mut last_sent: HashMap<i64, std::time::Instant> = HashMap::new();
+
+    loop {
+        // 봇 중지 확인
+        {
+            let st = shared.lock().unwrap();
+            if st.bot_should_stop { break; }
+        }
+
+        let access_token = {
+            let st = shared.lock().unwrap();
+            st.access_token.clone().unwrap_or_default()
+        };
+
+        if !access_token.is_empty() {
+            let timers = db::list_enabled_timer_messages(db);
+
+            // 삭제된 타이머 정리
+            last_sent.retain(|id, _| timers.iter().any(|t| t.id == *id));
+
+            let now = std::time::Instant::now();
+            for timer in &timers {
+                let interval = Duration::from_secs((timer.interval_minutes * 60) as u64);
+                let should_send = match last_sent.get(&timer.id) {
+                    Some(last) => now.duration_since(*last) >= interval,
+                    None => {
+                        // 첫 실행: interval 후에 첫 전송
+                        last_sent.insert(timer.id, now);
+                        false
+                    }
+                };
+
+                if should_send {
+                    last_sent.insert(timer.id, now);
+                    let msg = if timer.message.chars().count() > 100 {
+                        timer.message.chars().take(100).collect()
+                    } else {
+                        timer.message.clone()
+                    };
+                    match api::send_chat(&access_token, &msg).await {
+                        Ok(_) => {
+                            let mut st = shared.lock().unwrap();
+                            st.log(&format!("[타이머] {} → {}", timer.name, msg));
+                        }
+                        Err(e) => {
+                            let mut st = shared.lock().unwrap();
+                            st.log(&format!("[타이머] 전송 실패({}): {}", timer.name, e));
+                        }
+                    }
+                }
+            }
+        }
+
+        sleep(Duration::from_secs(10)).await;
     }
 }
 

@@ -69,6 +69,14 @@ pub fn init_db(db: &Db) {
             status         TEXT    DEFAULT 'queued',
             created_at     TEXT    DEFAULT (datetime('now', '+9 hours'))
         );
+
+        CREATE TABLE IF NOT EXISTS timer_messages (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            name             TEXT    NOT NULL,
+            message          TEXT    NOT NULL,
+            interval_minutes INTEGER NOT NULL DEFAULT 5,
+            enabled          INTEGER DEFAULT 1
+        );
         ",
     )
     .expect("테이블 생성 실패");
@@ -444,4 +452,77 @@ pub fn sr_count_by_user(db: &Db, requester: &str) -> i64 {
 pub fn sr_queue_count(db: &Db) -> i64 {
     let conn = db.lock().unwrap();
     conn.query_row("SELECT COUNT(*) FROM sr_queue WHERE status='queued'", [], |r| r.get(0)).unwrap_or(0)
+}
+
+// ── Timer Messages ──
+
+pub fn list_timer_messages(db: &Db) -> Vec<crate::app::TimerMessage> {
+    let conn = db.lock().unwrap();
+    let mut stmt = conn
+        .prepare("SELECT id, name, message, interval_minutes, enabled FROM timer_messages ORDER BY id")
+        .unwrap();
+    stmt.query_map([], |r| {
+        Ok(crate::app::TimerMessage {
+            id: r.get(0)?,
+            name: r.get(1)?,
+            message: r.get(2)?,
+            interval_minutes: r.get(3)?,
+            enabled: r.get::<_, i32>(4).unwrap_or(1) != 0,
+        })
+    })
+    .unwrap()
+    .filter_map(|r| r.ok())
+    .collect()
+}
+
+pub fn list_enabled_timer_messages(db: &Db) -> Vec<crate::app::TimerMessage> {
+    let conn = db.lock().unwrap();
+    let mut stmt = conn
+        .prepare("SELECT id, name, message, interval_minutes, enabled FROM timer_messages WHERE enabled=1 ORDER BY id")
+        .unwrap();
+    stmt.query_map([], |r| {
+        Ok(crate::app::TimerMessage {
+            id: r.get(0)?,
+            name: r.get(1)?,
+            message: r.get(2)?,
+            interval_minutes: r.get(3)?,
+            enabled: true,
+        })
+    })
+    .unwrap()
+    .filter_map(|r| r.ok())
+    .collect()
+}
+
+pub fn add_timer_message(db: &Db, name: &str, message: &str, interval_minutes: i64) -> Result<(), String> {
+    let conn = db.lock().unwrap();
+    conn.execute(
+        "INSERT INTO timer_messages(name, message, interval_minutes) VALUES(?1,?2,?3)",
+        params![name, message, interval_minutes],
+    )
+    .map_err(|e| format!("{e}"))?;
+    Ok(())
+}
+
+pub fn update_timer_message(db: &Db, id: i64, name: &str, message: &str, interval_minutes: i64, enabled: bool) {
+    let conn = db.lock().unwrap();
+    conn.execute(
+        "UPDATE timer_messages SET name=?1, message=?2, interval_minutes=?3, enabled=?4 WHERE id=?5",
+        params![name, message, interval_minutes, enabled as i32, id],
+    )
+    .ok();
+}
+
+pub fn set_timer_enabled(db: &Db, id: i64, enabled: bool) {
+    let conn = db.lock().unwrap();
+    conn.execute(
+        "UPDATE timer_messages SET enabled=?1 WHERE id=?2",
+        params![enabled as i32, id],
+    )
+    .ok();
+}
+
+pub fn delete_timer_message(db: &Db, id: i64) {
+    let conn = db.lock().unwrap();
+    conn.execute("DELETE FROM timer_messages WHERE id=?1", params![id]).ok();
 }

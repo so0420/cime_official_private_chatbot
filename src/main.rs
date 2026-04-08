@@ -25,8 +25,10 @@ async fn start_bot(shared: Shared, db: Db) {
     let (s3, d3) = (shared.clone(), db.clone());
     tokio::spawn(async move { api::channel_info_loop(s3, d3).await; });
     let sr_port: u16 = db::get_setting(&db, app::SETTING_SR_PORT).parse().unwrap_or(8081);
-    let (s4, d4) = (shared, db);
+    let (s4, d4) = (shared.clone(), db.clone());
     tokio::spawn(async move { sr::start_sr_server(s4, d4, sr_port).await; });
+    let (s5, d5) = (shared, db);
+    tokio::spawn(async move { bot::timer_loop(&s5, &d5).await; });
 }
 
 fn main() {
