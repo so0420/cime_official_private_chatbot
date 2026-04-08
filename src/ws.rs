@@ -263,7 +263,9 @@ fn parse_i32(v: &serde_json::Value) -> Option<i32> {
 fn parse_subscription_event(data: &serde_json::Value) -> Option<crate::app::SubscriptionEvent> {
     let channel_id = data.get("channelId")?.as_str()?.to_string();
     let subscriber_channel_id = data.get("subscriberChannelId")?.as_str()?.to_string();
-    let subscriber_channel_name = data.get("subscriberChannelName")?.as_str()?.to_string();
+    let subscriber_channel_name = data.get("subscriberChannelName")
+        .or_else(|| data.get("subscriberNickname"))
+        ?.as_str()?.to_string();
     let month = data.get("month").and_then(parse_i32).unwrap_or(1);
     let tier_no = data.get("tierNo").and_then(parse_i32).unwrap_or(1);
     let subscription_message = data
