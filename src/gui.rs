@@ -253,6 +253,29 @@ fn tag(ui: &mut egui::Ui, text: &str, color: egui::Color32) {
     });
 }
 
+fn toggle_switch(ui: &mut egui::Ui, on: &mut bool) -> egui::Response {
+    let desired_size = egui::vec2(36.0, 20.0);
+    let (rect, mut response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
+    if response.clicked() {
+        *on = !*on;
+        response.mark_changed();
+    }
+    if ui.is_rect_visible(rect) {
+        let how_on = ui.ctx().animate_bool_with_time(response.id, *on, 0.15);
+        let bg = egui::Color32::from_rgb(
+            (210.0 + (76.0 - 210.0) * how_on) as u8,
+            (200.0 + (175.0 - 200.0) * how_on) as u8,
+            (190.0 + (80.0 - 190.0) * how_on) as u8,
+        );
+        let radius = rect.height() / 2.0;
+        ui.painter().rect_filled(rect, radius, bg);
+        let circle_x = egui::lerp(rect.left() + radius..=rect.right() - radius, how_on);
+        let circle_center = egui::pos2(circle_x, rect.center().y);
+        ui.painter().circle_filled(circle_center, radius - 2.0, egui::Color32::WHITE);
+    }
+    response
+}
+
 fn labeled_field(ui: &mut egui::Ui, label: &str, value: &mut String, width: f32) {
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new(label).color(egui::Color32::from_rgb(180, 180, 190)));
@@ -963,7 +986,7 @@ impl BotGui {
                 card(ui, |ui| {
                     ui.horizontal(|ui| {
                         let mut enabled = timer.enabled;
-                        if ui.add(egui::Checkbox::without_text(&mut enabled)).changed() {
+                        if toggle_switch(ui, &mut enabled).changed() {
                             db::set_timer_enabled(&self.db, timer.id, enabled); self.timer_dirty = true;
                         }
                         tag(ui, &format!("{}분 간격", timer.interval_minutes), BROWN);
