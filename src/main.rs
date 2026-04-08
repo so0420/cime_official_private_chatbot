@@ -50,6 +50,10 @@ fn main() {
 
     // 공유 상태
     let shared = app::new_shared();
+    {
+        let mut st = shared.lock().unwrap();
+        st.log_file = app::init_log_file();
+    }
 
     // 저장된 세션 복원 → 성공 시 봇 자동 시작
     {

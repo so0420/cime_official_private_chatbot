@@ -1,4 +1,6 @@
 use std::collections::{HashSet, VecDeque};
+use std::io::Write;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
@@ -48,6 +50,7 @@ pub struct SharedState {
 
     // Logs
     pub logs: VecDeque<String>,
+    pub log_file: Option<std::fs::File>,
 }
 
 impl Default for SharedState {
@@ -77,6 +80,7 @@ impl Default for SharedState {
             sr_current_requester: None,
             sr_volume: 50,
             logs: VecDeque::with_capacity(500),
+            log_file: None,
         }
     }
 }
@@ -88,7 +92,56 @@ impl SharedState {
         if self.logs.len() >= 500 {
             self.logs.pop_front();
         }
-        self.logs.push_back(line);
+        self.logs.push_back(line.clone());
+        if let Some(f) = &mut self.log_file {
+            let _ = writeln!(f, "{}", line);
+            let _ = f.flush();
+        }
+    }
+}
+
+/// 로그 디렉토리 및 파일 초기화.
+/// logs/ 폴더 안에 날짜별 로그 파일 생성, 최신 2개만 유지.
+pub fn init_log_file() -> Option<std::fs::File> {
+    let logs_dir = log_dir();
+    let _ = std::fs::create_dir_all(&logs_dir);
+
+    // 기존 로그 파일 정리 (최신 2개만 유지)
+    cleanup_old_logs(&logs_dir, 2);
+
+    let filename = format!("{}.log", chrono::Local::now().format("%Y-%m-%d_%H-%M-%S"));
+    let path = logs_dir.join(filename);
+    std::fs::File::create(path).ok()
+}
+
+fn log_dir() -> PathBuf {
+    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
+    let dir = exe.parent().unwrap_or_else(|| std::path::Path::new(".")).join("cime_bot").join("logs");
+    dir
+}
+
+fn cleanup_old_logs(dir: &std::path::Path, keep: usize) {
+    let mut files: Vec<_> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().map(|ext| ext == "log").unwrap_or(false))
+        .collect();
+
+    if files.len() < keep {
+        return;
+    }
+
+    // 수정 시간 기준 내림차순 정렬
+    files.sort_by(|a, b| {
+        let ta = a.metadata().and_then(|m| m.modified()).unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+        let tb = b.metadata().and_then(|m| m.modified()).unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+        tb.cmp(&ta)
+    });
+
+    // keep개 이후 삭제
+    for old in files.into_iter().skip(keep) {
+        let _ = std::fs::remove_file(old.path());
     }
 }
 

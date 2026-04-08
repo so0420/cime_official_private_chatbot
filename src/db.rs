@@ -6,9 +6,15 @@ use crate::app::*;
 
 pub type Db = Arc<Mutex<Connection>>;
 
-pub fn db_path() -> PathBuf {
+pub fn data_dir() -> PathBuf {
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
-    exe.parent().unwrap_or_else(|| std::path::Path::new(".")).join("bot.db")
+    let dir = exe.parent().unwrap_or_else(|| std::path::Path::new(".")).join("cime_bot");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+pub fn db_path() -> PathBuf {
+    data_dir().join("bot.db")
 }
 
 pub fn open_db() -> Db {
