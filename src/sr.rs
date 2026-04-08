@@ -129,8 +129,12 @@ body{{background:transparent;overflow:hidden}}
 <div id="info"><span id="title"></span> <span id="req" style="color:#aaa;font-size:12px"></span></div>
 <div id="wrap"><div id="player"></div></div>
 <script>
-let player=null, apiReady=false, currentId=null, playing=false;
+let player=null, apiReady=false, currentId=null, playing=false, createTime=0, everPlayed=false;
 const PORT={port};
+
+function skipToNext(){{
+  fetch('http://127.0.0.1:'+PORT+'/api/sr/ended',{{method:'POST'}}).catch(()=>{{}});
+}}
 
 // YouTube API 로드 완료 시 호출되지만, 플레이어는 아직 만들지 않음
 function onYouTubeIframeAPIReady(){{ apiReady=true; }}
@@ -139,16 +143,19 @@ function createPlayer(videoId){{
   // 기존 플레이어 제거
   if(player){{player.destroy();player=null;}}
   document.getElementById('wrap').classList.add('show');
+  everPlayed=false;
+  createTime=Date.now();
   player=new YT.Player('player',{{
     width:'100%',height:'100%',
     videoId:videoId,
     playerVars:{{autoplay:1,controls:0,rel:0,modestbranding:1}},
     events:{{
       onStateChange:e=>{{
-        if(e.data===YT.PlayerState.ENDED)fetch('http://127.0.0.1:'+PORT+'/api/sr/ended',{{method:'POST'}}).catch(()=>{{}})
+        if(e.data===YT.PlayerState.PLAYING)everPlayed=true;
+        if(e.data===YT.PlayerState.ENDED)skipToNext();
       }},
       onError:e=>{{
-        fetch('http://127.0.0.1:'+PORT+'/api/sr/ended',{{method:'POST'}}).catch(()=>{{}})
+        skipToNext();
       }}
     }}
   }});
@@ -191,6 +198,11 @@ async function poll(){{
       if(playing)hidePlayer();
     }}
     if(player&&d.volume!==undefined&&d.volume!==null)player.setVolume(d.volume);
+    // 워치독: 10초 내 재생이 시작되지 않으면 자동 스킵
+    if(playing&&createTime&&!everPlayed&&(Date.now()-createTime>10000)){{
+      createTime=0;
+      skipToNext();
+    }}
   }}catch(e){{}}
 }}
 setInterval(poll,1000);
