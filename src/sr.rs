@@ -239,7 +239,7 @@ fn sr_list_overlay_html(port: u16) -> String {
 <html lang="ko"><head><meta charset="UTF-8">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css"/>
 <style>
-:root{{--yellow:#FFD700;--white:#FFF;--gray:rgba(255,255,255,0.9);--bg:rgba(15,15,15,0.95);--bg-item:rgba(255,255,255,0.15);--r-lg:16px;--r-sm:8px}}
+:root{{--yellow:#FFD700;--white:#FFF;--gray:rgba(255,255,255,0.9);--bg:rgba(15,15,15,0.95);--bg-item:rgba(15,15,15,0.7);--r-lg:16px;--r-sm:8px}}
 *{{box-sizing:border-box}}
 body{{font-family:"Pretendard Variable",Pretendard,sans-serif;margin:0;padding:0;width:100vw;height:100vh;overflow:hidden;background:transparent;display:flex;justify-content:center;align-items:center}}
 .widget{{width:360px;display:flex;flex-direction:column;gap:12px;text-align:left}}
@@ -499,7 +499,11 @@ pub fn add_and_maybe_play(shared: &Shared, db: &Db, video_id: &str, title: &str,
     { shared.lock().unwrap().sr_queue_changed = true; }
     let is_idle = {
         let st = shared.lock().unwrap();
-        st.sr_command.as_deref() != Some("play") && st.sr_command.as_deref() != Some("pause")
+        // 현재 곡이 있으면 idle이 아님
+        if st.sr_current_video_id.is_some() { false }
+        else {
+            st.sr_command.as_deref() != Some("play") && st.sr_command.as_deref() != Some("pause")
+        }
     };
     if is_idle {
         play_next(shared, db);
