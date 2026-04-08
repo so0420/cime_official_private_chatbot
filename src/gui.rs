@@ -84,7 +84,6 @@ pub struct BotGui {
 
     // 반복 메세지 (타이머)
     timer_messages: Vec<TimerMessage>,
-    timer_name: String,
     timer_msg: String,
     timer_interval: String,
     timer_dirty: bool,
@@ -129,7 +128,7 @@ impl BotGui {
             sub_enabled: true, sub_rules: vec![], sub_dirty: true, sub_loaded: false,
             sub_tier: "1".into(), sub_msg: String::new(),
             sr_enabled: true, sr_max_duration: "600".into(), sr_queue: vec![], sr_dirty: true, sr_loaded: false,
-            timer_messages: vec![], timer_name: String::new(), timer_msg: String::new(),
+            timer_messages: vec![], timer_msg: String::new(),
             timer_interval: "5".into(), timer_dirty: true, editing_timer_id: None,
             attendance_reset_hour: "5".into(), settings_loaded: false,
             log_auto_scroll: true,
@@ -906,7 +905,7 @@ impl BotGui {
     fn reload_timer_messages(&mut self) { self.timer_messages = db::list_timer_messages(&self.db); self.timer_dirty = false; }
 
     fn clear_timer_form(&mut self) {
-        self.timer_name.clear(); self.timer_msg.clear(); self.timer_interval = "5".into(); self.editing_timer_id = None;
+        self.timer_msg.clear(); self.timer_interval = "5".into(); self.editing_timer_id = None;
     }
 
     fn draw_timer(&mut self, ui: &mut egui::Ui) {
@@ -919,10 +918,6 @@ impl BotGui {
         card(ui, |ui| {
             sub_heading(ui, if self.editing_timer_id.is_some() { "반복 메세지 수정" } else { "반복 메세지 추가" });
             ui.add_space(4.0);
-
-            ui.label(egui::RichText::new("이름").color(DIM).size(12.0));
-            ui.add(egui::TextEdit::singleline(&mut self.timer_name).desired_width(f32::INFINITY).hint_text("예: 팔로우 안내"));
-            ui.add_space(2.0);
 
             ui.label(egui::RichText::new("메세지").color(DIM).size(12.0));
             ui.add(egui::TextEdit::multiline(&mut self.timer_msg).desired_width(f32::INFINITY).desired_rows(2).hint_text("채팅에 보낼 메세지를 입력하세요."));
@@ -940,16 +935,16 @@ impl BotGui {
                     if accent_button(ui, "수정 완료").clicked() {
                         if let Some(id) = self.editing_timer_id {
                             let interval: i64 = self.timer_interval.parse().unwrap_or(5).max(1);
-                            db::update_timer_message(&self.db, id, &self.timer_name, &self.timer_msg, interval, true);
+                            db::update_timer_message(&self.db, id, &self.timer_msg, &self.timer_msg, interval, true);
                             self.clear_timer_form(); self.timer_dirty = true;
                         }
                     }
                     if ui.button("취소").clicked() { self.clear_timer_form(); }
                 } else {
                     if accent_button(ui, "추가").clicked() {
-                        if !self.timer_name.is_empty() && !self.timer_msg.is_empty() {
+                        if !self.timer_msg.is_empty() {
                             let interval: i64 = self.timer_interval.parse().unwrap_or(5).max(1);
-                            match db::add_timer_message(&self.db, &self.timer_name, &self.timer_msg, interval) {
+                            match db::add_timer_message(&self.db, &self.timer_msg, &self.timer_msg, interval) {
                                 Ok(_) => { self.clear_timer_form(); self.timer_dirty = true; }
                                 Err(e) => { let mut st = self.shared.lock().unwrap(); st.log(&format!("타이머 추가 실패: {e}")); }
                             }
@@ -967,7 +962,6 @@ impl BotGui {
             for timer in &timers {
                 card(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(&timer.name).strong().size(14.0).color(BROWN));
                         tag(ui, &format!("{}분 간격", timer.interval_minutes), TAG_BLUE);
                         if timer.enabled {
                             tag(ui, "활성", ACCENT);
@@ -980,7 +974,6 @@ impl BotGui {
                             }
                             if ui.small_button(egui::RichText::new("수정").size(11.0)).clicked() {
                                 self.editing_timer_id = Some(timer.id);
-                                self.timer_name = timer.name.clone();
                                 self.timer_msg = timer.message.clone();
                                 self.timer_interval = timer.interval_minutes.to_string();
                             }

@@ -603,11 +603,11 @@ pub async fn timer_loop(shared: &Shared, db: &Db) {
                     match api::send_chat(&access_token, &msg).await {
                         Ok(_) => {
                             let mut st = shared.lock().unwrap();
-                            st.log(&format!("[타이머] {} → {}", timer.name, msg));
+                            st.log(&format!("[타이머] {}", msg));
                         }
                         Err(e) => {
                             let mut st = shared.lock().unwrap();
-                            st.log(&format!("[타이머] 전송 실패({}): {}", timer.name, e));
+                            st.log(&format!("[타이머] 전송 실패: {}", e));
                         }
                     }
                 }
