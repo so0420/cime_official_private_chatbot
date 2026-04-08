@@ -375,6 +375,7 @@ impl eframe::App for BotGui {
 
             // 하단 봇 버튼
             ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                ui.label(egui::RichText::new("made by jamkubot").size(10.0).color(DIM));
                 ui.add_space(4.0);
                 if bot_running {
                     let btn = egui::Button::new(
