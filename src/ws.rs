@@ -234,9 +234,14 @@ fn parse_donation_event(data: &serde_json::Value) -> Option<DonationEvent> {
         .get("donatorNickname")
         .and_then(|v| v.as_str())
         .map(String::from);
-    let pay_amount = data.get("payAmount")?.as_i64()?;
+    // payAmount: 숫자 또는 문자열, 또는 amount 필드도 시도
+    let pay_amount = data.get("payAmount")
+        .or_else(|| data.get("amount"))
+        .and_then(|v| v.as_i64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+        .unwrap_or(0);
     let donation_text = data
         .get("donationText")
+        .or_else(|| data.get("message"))
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
