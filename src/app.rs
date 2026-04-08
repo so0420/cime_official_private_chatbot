@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
@@ -43,6 +43,9 @@ pub struct SharedState {
     pub sr_current_requester: Option<String>,
     pub sr_volume: i32,
 
+    // 채널 관리자
+    pub manager_channel_ids: HashSet<String>,
+
     // Logs
     pub logs: VecDeque<String>,
 }
@@ -66,6 +69,7 @@ impl Default for SharedState {
             live_title: String::new(),
             category: String::new(),
             opened_at: None,
+            manager_channel_ids: HashSet::new(),
             sr_queue_changed: false,
             sr_command: None,
             sr_current_video_id: None,
@@ -259,6 +263,16 @@ pub struct CategorySearchResult {
     pub category_id: String,
     pub category_type: Option<String>,
     pub category_value: String,
+}
+
+// ── 채널 관리자 ──
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamingRole {
+    pub manager_channel_id: String,
+    pub manager_channel_name: String,
+    pub user_role: String,
 }
 
 // ── 반복 메세지 (타이머) ──

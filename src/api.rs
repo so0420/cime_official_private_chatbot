@@ -243,6 +243,27 @@ pub async fn search_categories(
     Ok(api_resp.content.map(|c| c.data).unwrap_or_default())
 }
 
+/// 채널 관리자 목록 조회
+pub async fn get_streaming_roles(access_token: &str) -> Result<Vec<StreamingRole>, String> {
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!("{}/open/v1/channels/streaming-roles", BASE_URL))
+        .bearer_auth(access_token)
+        .send()
+        .await
+        .map_err(|e| format!("관리자 목록 조회 실패: {e}"))?;
+
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!("관리자 목록 조회 실패 ({}): {}", status, body));
+    }
+
+    let api_resp: ApiResponse<Vec<StreamingRole>> =
+        serde_json::from_str(&body).map_err(|e| format!("{e}"))?;
+    Ok(api_resp.content.unwrap_or_default())
+}
+
 /// 채널 정보 갱신 루프
 pub async fn channel_info_loop(shared: Shared, _db: Db) {
     loop {
@@ -268,7 +289,7 @@ pub async fn channel_info_loop(shared: Shared, _db: Db) {
                 st.opened_at = status.opened_at;
             }
 
-            // 라이브 설정 (카테고리)
+            // 라이브 설정 (카테고리) + 관리자 목록
             if !access_token.is_empty() {
                 if let Ok(setting) = get_live_setting(&access_token).await {
                     let mut st = shared.lock().unwrap();
@@ -281,6 +302,14 @@ pub async fn channel_info_loop(shared: Shared, _db: Db) {
                         .category
                         .and_then(|c| c.category_value)
                         .unwrap_or_else(|| "없음".into());
+                }
+
+                if let Ok(roles) = get_streaming_roles(&access_token).await {
+                    let ids: std::collections::HashSet<String> = roles.iter()
+                        .map(|r| r.manager_channel_id.clone())
+                        .collect();
+                    let mut st = shared.lock().unwrap();
+                    st.manager_channel_ids = ids;
                 }
             }
 

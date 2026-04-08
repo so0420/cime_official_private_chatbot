@@ -7,13 +7,11 @@ use crate::sr;
 const PRIVILEGED_SLUGS: &[&str] = &["so0420", "jamkubot", "jamku_manager"];
 
 fn is_privileged(shared: &Shared, sender_channel_id: &str, sender_slug: Option<&str>) -> bool {
-    let is_owner = {
-        let st = shared.lock().unwrap();
-        st.channel_id.as_deref() == Some(sender_channel_id)
-    };
-    if is_owner { return true; }
+    let st = shared.lock().unwrap();
+    if st.channel_id.as_deref() == Some(sender_channel_id) { return true; }
+    if st.manager_channel_ids.contains(sender_channel_id) { return true; }
     if let Some(slug) = sender_slug {
-        return PRIVILEGED_SLUGS.contains(&slug);
+        if PRIVILEGED_SLUGS.contains(&slug) { return true; }
     }
     false
 }
