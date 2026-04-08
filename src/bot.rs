@@ -16,6 +16,32 @@ fn is_privileged(shared: &Shared, sender_channel_id: &str, sender_slug: Option<&
     false
 }
 
+/// 카테고리 별칭 → 실제 검색어 변환
+fn resolve_category_alias(input: &str) -> String {
+    const ALIASES: &[(&str, &str)] = &[
+        ("배그", "배틀그라운드"),
+        ("저챗", "저스트 채팅"),
+        ("마크", "마인크래프트"),
+        ("롤", "리그 오브 레전드"),
+        ("림컴", "림버스컴퍼니"),
+        ("젠존제", "젠레스 존 제로"),
+        ("종겜", "종합게임"),
+        ("옵치", "오버워치"),
+        ("두두타", "두근두근타운"),
+        ("롤체", "전략적 팀 전투"),
+        ("모비노기", "마비노기 모바일"),
+        ("슬더스2", "슬레이 더 스파이어 2"),
+        ("슬더스", "슬레이 더 스파이어"),
+    ];
+    let trimmed = input.trim();
+    for (alias, full) in ALIASES {
+        if trimmed == *alias {
+            return full.to_string();
+        }
+    }
+    trimmed.to_string()
+}
+
 /// 업타임 계산
 pub fn calc_uptime(opened_at: &str) -> String {
     let start = match chrono::DateTime::parse_from_rfc3339(opened_at) {
@@ -290,12 +316,13 @@ async fn handle_streamer_command(shared: &Shared, db: &Db, trigger: &str, args: 
             true
         }
         "!카테고리" if db::get_setting(db, SETTING_SCMD_CATEGORY) == "1" => {
-            match api::search_categories(&client_id, &client_secret, args).await {
+            let search_term = resolve_category_alias(args);
+            match api::search_categories(&client_id, &client_secret, &search_term).await {
                 Ok(cats) if !cats.is_empty() => {
                     // 가장 유사한 카테고리: 정확 일치 → 포함 → 첫 번째
                     let best = cats.iter()
-                        .find(|c| c.category_value == args)
-                        .or_else(|| cats.iter().find(|c| c.category_value.contains(args)))
+                        .find(|c| c.category_value == search_term)
+                        .or_else(|| cats.iter().find(|c| c.category_value.contains(search_term.as_str())))
                         .unwrap_or(&cats[0]);
 
                     {
