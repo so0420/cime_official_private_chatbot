@@ -180,18 +180,23 @@ async fn handle_ws_message(shared: &Shared, db: &Db, text: &str) {
 fn parse_chat_event(data: &serde_json::Value) -> Option<ChatEvent> {
     let channel_id = data.get("channelId")?.as_str()?.to_string();
     let sender_channel_id = data.get("senderChannelId")?.as_str()?.to_string();
-    let nickname = data
-        .get("profile")
+    let profile = data.get("profile");
+    let nickname = profile
         .and_then(|p| p.get("nickname"))
         .and_then(|n| n.as_str())
         .unwrap_or("알 수 없음")
         .to_string();
+    let sender_slug = profile
+        .and_then(|p| p.get("channelHandle"))
+        .and_then(|h| h.as_str())
+        .map(String::from);
     let content = data.get("content")?.as_str()?.to_string();
 
     Some(ChatEvent {
         channel_id,
         sender_channel_id,
         sender_nickname: nickname,
+        sender_slug,
         content,
     })
 }

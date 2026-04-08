@@ -123,6 +123,7 @@ pub struct ChatEvent {
     pub channel_id: String,
     pub sender_channel_id: String,
     pub sender_nickname: String,
+    pub sender_slug: Option<String>,
     pub content: String,
 }
 

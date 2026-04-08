@@ -3,6 +3,21 @@ use crate::app::*;
 use crate::db::{self, Db};
 use crate::sr;
 
+/// 스트리머 또는 매니저 권한 확인
+const PRIVILEGED_SLUGS: &[&str] = &["so0420", "jamkubot", "jamku_manager"];
+
+fn is_privileged(shared: &Shared, sender_channel_id: &str, sender_slug: Option<&str>) -> bool {
+    let is_owner = {
+        let st = shared.lock().unwrap();
+        st.channel_id.as_deref() == Some(sender_channel_id)
+    };
+    if is_owner { return true; }
+    if let Some(slug) = sender_slug {
+        return PRIVILEGED_SLUGS.contains(&slug);
+    }
+    false
+}
+
 /// 업타임 계산
 pub fn calc_uptime(opened_at: &str) -> String {
     let start = match chrono::DateTime::parse_from_rfc3339(opened_at) {
@@ -148,10 +163,7 @@ pub async fn handle_chat(shared: &Shared, db: &Db, event: &ChatEvent) {
 
     // 스트리머 명령어 처리 (인자가 있을 때만)
     if !args.is_empty() {
-        let is_streamer = {
-            let st = shared.lock().unwrap();
-            st.channel_id.as_deref() == Some(&event.sender_channel_id)
-        };
+        let is_streamer = is_privileged(shared, &event.sender_channel_id, event.sender_slug.as_deref());
         if is_streamer {
             let handled = handle_streamer_command(shared, db, trigger, args).await;
             if handled { return; }
@@ -160,7 +172,7 @@ pub async fn handle_chat(shared: &Shared, db: &Db, event: &ChatEvent) {
 
     // SR 명령어 처리
     if trigger == "!sr" || trigger == "!SR" || trigger == "!sl" || trigger == "!SL" {
-        handle_sr_command(shared, db, trigger, args, &event.sender_nickname, &event.sender_channel_id).await;
+        handle_sr_command(shared, db, trigger, args, &event.sender_nickname, &event.sender_channel_id, event.sender_slug.as_deref()).await;
         return;
     }
 
@@ -410,14 +422,11 @@ pub async fn handle_donation(shared: &Shared, db: &Db, event: &DonationEvent) {
 }
 
 /// SR 명령어 처리
-async fn handle_sr_command(shared: &Shared, db: &Db, trigger: &str, args: &str, sender: &str, sender_cid: &str) {
+async fn handle_sr_command(shared: &Shared, db: &Db, trigger: &str, args: &str, sender: &str, sender_cid: &str, sender_slug: Option<&str>) {
     let access_token = { shared.lock().unwrap().access_token.clone().unwrap_or_default() };
     if access_token.is_empty() { return; }
 
-    let is_streamer = {
-        let st = shared.lock().unwrap();
-        st.channel_id.as_deref() == Some(sender_cid)
-    };
+    let is_streamer = is_privileged(shared, sender_cid, sender_slug);
 
     // !sl - 현재 재생 정보
     if trigger == "!sl" || trigger == "!SL" {
