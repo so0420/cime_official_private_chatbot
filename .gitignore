@@ -22,3 +22,5 @@ roulette_overlay.html
 
 # Images (development only)
 *.png
+!icon128.png
+!icon.ico

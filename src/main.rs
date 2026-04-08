@@ -73,10 +73,17 @@ fn main() {
     }
 
     // GUI 실행
+    let icon_data = image::load_from_memory(include_bytes!("../icon128.png"))
+        .expect("아이콘 로드 실패")
+        .to_rgba8();
+    let (w, h) = icon_data.dimensions();
+    let icon = eframe::egui::IconData { rgba: icon_data.into_raw(), width: w, height: h };
+
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_inner_size([850.0, 680.0])
-            .with_min_inner_size([650.0, 480.0]),
+            .with_min_inner_size([650.0, 480.0])
+            .with_icon(std::sync::Arc::new(icon)),
         ..Default::default()
     };
 
