@@ -148,20 +148,9 @@ async fn run_session(shared: &Shared, db: &Db) -> Result<(), String> {
 }
 
 async fn handle_ws_message(shared: &Shared, db: &Db, text: &str) {
-    // 원본 메시지 로그 (최대 300자)
-    {
-        let mut st = shared.lock().unwrap();
-        let preview: String = text.chars().take(300).collect();
-        st.log(&format!("[WS 수신] {}", preview));
-    }
-
     let event: WsEvent = match serde_json::from_str(text) {
         Ok(e) => e,
-        Err(e) => {
-            let mut st = shared.lock().unwrap();
-            st.log(&format!("[WS] 파싱 실패: {}", e));
-            return;
-        }
+        Err(_) => return,
     };
 
     match event.event.as_str() {
@@ -172,31 +161,19 @@ async fn handle_ws_message(shared: &Shared, db: &Db, text: &str) {
                     st.log(&format!("[{}] {}", chat.sender_nickname, chat.content));
                 }
                 bot::handle_chat(shared, db, &chat).await;
-            } else {
-                let mut st = shared.lock().unwrap();
-                st.log("[WS] CHAT 이벤트 파싱 실패");
             }
         }
         "DONATION" => {
             if let Some(donation) = parse_donation_event(&event.data) {
                 bot::handle_donation(shared, db, &donation).await;
-            } else {
-                let mut st = shared.lock().unwrap();
-                st.log("[WS] DONATION 이벤트 파싱 실패");
             }
         }
         "SUBSCRIPTION" => {
             if let Some(sub) = parse_subscription_event(&event.data) {
                 bot::handle_subscription(shared, db, &sub).await;
-            } else {
-                let mut st = shared.lock().unwrap();
-                st.log("[WS] SUBSCRIPTION 이벤트 파싱 실패");
             }
         }
-        other => {
-            let mut st = shared.lock().unwrap();
-            st.log(&format!("[WS] 알 수 없는 이벤트: {}", other));
-        }
+        _ => {}
     }
 }
 
