@@ -209,10 +209,22 @@ async function poll(){{
       if(playing)hidePlayer();
     }}
     if(player&&typeof player.setVolume==='function'&&d.volume!==undefined&&d.volume!==null)player.setVolume(d.volume);
-    // 워치독: 10초 내 재생 안 되면 자동 스킵
-    if(playing&&loadTime&&!everPlayed&&(Date.now()-loadTime>10000)){{
-      loadTime=0;
-      skipToNext();
+    // 워치독: 재생 시작 안 되거나 에러 상태이면 자동 스킵
+    if(playing&&currentId&&loadTime&&!everPlayed){{
+      const elapsed=Date.now()-loadTime;
+      if(elapsed>5000){{
+        try{{
+          const st=player.getPlayerState();
+          // -1=unstarted, 0=ended, 5=cued → 모두 재생 실패로 간주
+          if(st===-1||st===0||st===5||st===undefined||st===null){{
+            loadTime=0;
+            skipToNext();
+          }}
+        }}catch(ex){{
+          loadTime=0;
+          skipToNext();
+        }}
+      }}
     }}
   }}catch(e){{}}
 }}
